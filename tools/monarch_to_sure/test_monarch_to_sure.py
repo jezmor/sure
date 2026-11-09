@@ -128,7 +128,12 @@ class ConvertTest(unittest.TestCase):
         self.assertTrue(account["skip_opening_balance_import"])
         self.assertEqual("95.00", account["balance"])
 
-    def test_history_that_ends_early_is_closed_out(self):
+    def test_history_that_ends_early_is_not_assumed_closed(self):
+        self.assertNotIn("monarch-valuation:Old Savings:2024-01-02", self.records("Valuation"))
+        self.assertEqual("10.00", self.records("Account")["monarch-account:Old Savings"]["balance"])
+
+    def test_closed_accounts_drop_to_zero(self):
+        self.config["accounts"]["Old Savings"]["closed"] = True
         valuations = self.records("Valuation")
         self.assertEqual("0.00", valuations["monarch-valuation:Old Savings:2024-01-02"]["amount"])
         self.assertEqual("0.00", self.records("Account")["monarch-account:Old Savings"]["balance"])
@@ -137,6 +142,13 @@ class ConvertTest(unittest.TestCase):
         self.config["accounts"]["Card"]["status"] = "disabled"
         self.assertEqual("disabled", self.records("Account")["monarch-account:Card"]["status"])
         self.assertEqual("active", self.records("Account")["monarch-account:Checking"]["status"])
+
+    def test_closed_must_be_a_boolean(self):
+        self.config["accounts"]["Card"]["closed"] = "yes"
+        with open(self.config_path, "w") as f:
+            json.dump(self.config, f)
+        with self.assertRaises(ValueError):
+            m.load_config(self.config_path)
 
     def test_invalid_status_is_rejected(self):
         self.config["accounts"]["Card"]["status"] = "closed"
@@ -176,10 +188,12 @@ class AccountReviewTest(unittest.TestCase):
         self.assertEqual(date(2024, 1, 2), m.last_activity(history, set()))
         self.assertEqual(date(2024, 2, 1), m.last_activity(history, {date(2024, 2, 1)}))
 
-    def test_stale_accounts_are_suggested_disabled(self):
+    def test_stale_accounts_are_only_suggested_closed(self):
         end = date(2024, 12, 31)
-        self.assertEqual("disabled", m.guess_account("Old", days(("2024-01-01", "5")), set(), end)["status"])
-        self.assertEqual("active", m.guess_account("New", days(("2024-12-01", "5")), set(), end)["status"])
+        old = m.guess_account("Old", days(("2024-01-01", "5")), set(), end)
+        self.assertTrue(old["_suggest_closed"])
+        self.assertEqual((False, "active"), (old["closed"], old["status"]))
+        self.assertFalse(m.guess_account("New", days(("2024-12-01", "5")), set(), end)["_suggest_closed"])
 
     def test_selection_parsing(self):
         self.assertEqual({1, 4, 5, 6}, m.parse_selection("1, 4-6", 6))
@@ -202,17 +216,20 @@ class AccountReviewTest(unittest.TestCase):
 
     def test_enter_accepts_suggestions(self):
         accounts = self.review("", "")
-        self.assertEqual(("active", True), (accounts["Recent"]["status"], accounts["Recent"]["include"]))
-        self.assertEqual(("disabled", True), (accounts["Old"]["status"], accounts["Old"]["include"]))
+        recent, old = accounts["Recent"], accounts["Old"]
+        self.assertEqual((False, "active", True), (recent["closed"], recent["status"], recent["include"]))
+        self.assertEqual((True, "disabled", True), (old["closed"], old["status"], old["include"]))
 
     def test_answers_override_suggestions(self):
         # Accounts are listed newest first: 1 is Recent, 2 is Old.
         accounts = self.review("1", "2")
-        self.assertEqual("disabled", accounts["Recent"]["status"])
+        self.assertTrue(accounts["Recent"]["closed"])
+        self.assertFalse(accounts["Old"]["closed"])
         self.assertFalse(accounts["Old"]["include"])
 
     def test_invalid_answer_asks_again(self):
         accounts = self.review("9", "none", "")
+        self.assertFalse(accounts["Old"]["closed"])
         self.assertEqual("active", accounts["Old"]["status"])
 
 

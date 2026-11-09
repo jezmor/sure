@@ -35,21 +35,23 @@ blank), and `Owner`, `Reviewed`, `Reviewed At` and `Reviewed By`.
 
    It lists every account with its last activity: the later of its last
    transaction and the last day its balance changed. It then asks which
-   accounts to import as disabled and which to skip. Answer with numbers and
-   ranges such as `1,4-6`, or press Enter to accept the suggestion. Accounts
-   with no activity in the last 180 days are suggested for disabling.
+   accounts are closed and which to skip. Answer with numbers and ranges such
+   as `1,4-6`, or `none`, or press Enter to accept the suggestion. Accounts
+   with no activity in the last 180 days are suggested as closed, but
+   inactivity doesn't prove an account was closed, so check each one. See
+   [Closed accounts](#closed-accounts).
 
-   Disabled accounts suit accounts you keep only for their history. Sure hides
-   them from current balances, but they still count toward net worth up to the
-   day they were imported. Pass `--no-input` to skip the questions and keep the
-   suggestions.
+   Pass `--no-input` to skip the questions. Every account is then imported as
+   open and active.
 
    Then open `accounts.json` and check each account's `type`. The CSVs don't
    say what type each account is, so the tool guesses: mostly-negative balances
    become `CreditCard` (or `Loan` when there are no transactions), other
    accounts with transactions become `Depository`, and the rest become
-   `Investment`. You can also change `status` (`active` or `disabled`) and
-   `include` there, and optionally set `subtype` and `currency`.
+   `Investment`. A negative balance alone can't tell a credit card from a
+   loan, so check every type. You can also change `closed`, `status`
+   (`active` or `disabled`) and `include` there, and optionally set `subtype`
+   and `currency`.
 
 4. Build the import file. `convert` reads your existing categories and
    merchants from Sure (see [Existing data](#existing-data)), so it needs the
@@ -106,11 +108,17 @@ as one being imported. Pass `--allow-existing-accounts` to import anyway.
 
 ## Closed accounts
 
-When an account's balance history ends before the rest of the export, Sure
-would otherwise keep showing its last balance forever. The converter adds a
-zero balance the day after the history ends. Set `close_after_history` to
-`false` in `accounts.json` to keep the last balance, or `true` to always close
-the account out.
+The tool only treats an account as closed when you say so, either at the
+prompt or with `"closed": true` in `accounts.json`. A closed account:
+
+- gets a zero balance the day after Monarch's last balance for it, so Sure
+  doesn't keep showing its final balance forever
+- is imported disabled: hidden from current balances, but still part of net
+  worth history
+
+An account that isn't closed keeps its last Monarch balance, even when its
+history ends before the rest of the export. To hide an open account without
+zeroing it, set `"status": "disabled"` and leave `closed` as `false`.
 
 ## Tests
 

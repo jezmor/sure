@@ -120,11 +120,12 @@ def guess_account(name, history, tx_dates, export_end):
 
     return {
         "type": account_type,
-        "status": "disabled" if stale else "active",
+        "closed": False,
+        "status": "active",
         "subtype": None,
         "include": True,
         "currency": None,
-        "close_after_history": None,
+        "_suggest_closed": stale,
         "_last_activity": active_on.isoformat() if active_on else None,
         "_latest_balance": str(values[-1]) if values else None,
         "_transactions": len(tx_dates),
@@ -169,11 +170,13 @@ def ago(day, today):
 
 
 def review_accounts(accounts, export_end, ask=input, out=print):
-    """Ask which accounts to import as disabled and which to skip.
+    """Ask which accounts are closed and which to skip.
 
-    Disabled accounts are hidden from current balances but their history still
-    counts toward net worth up to the import date, which suits accounts kept
-    only for the record.
+    A closed account is imported disabled, and its balance drops to zero the
+    day after Monarch's last balance for it. Sure hides disabled accounts from
+    current balances but keeps their history in net worth. Long-inactive
+    accounts are only suggested as closed, since inactivity alone doesn't
+    prove an account was closed.
     """
     names = sorted(accounts, key=lambda n: accounts[n]["_last_activity"] or "", reverse=True)
     width = max(len(n) for n in names)
@@ -196,14 +199,17 @@ def review_accounts(accounts, export_end, ask=input, out=print):
             except ValueError as e:
                 out(f"  {e}. Use numbers and ranges like 1,4-6, or none.")
 
-    out(f"\nDisabled accounts keep their history in net worth but are hidden from current balances.")
-    out(f"Suggested: accounts with no activity in the last {STALE_AFTER_DAYS} days.")
-    suggested = {i for i, n in enumerate(names, start=1) if accounts[n]["status"] == "disabled"}
-    disabled = choose("Accounts to import as disabled", suggested)
-    skipped = choose("Accounts to skip entirely", set())
+    out("\nClosed accounts drop to zero after their last Monarch balance and are imported disabled:")
+    out("hidden from current balances, but still part of net worth history. Other accounts stay")
+    out("active and keep their last balance.")
+    out(f"Suggested: accounts with no activity in the last {STALE_AFTER_DAYS} days. Check each one.")
+    suggested = {i for i, n in enumerate(names, start=1) if accounts[n]["_suggest_closed"]}
+    closed = choose("Which accounts are closed?", suggested)
+    skipped = choose("Which accounts should be skipped entirely?", set())
 
     for i, name in enumerate(names, start=1):
-        accounts[name]["status"] = "disabled" if i in disabled else "active"
+        accounts[name]["closed"] = i in closed
+        accounts[name]["status"] = "disabled" if i in closed else "active"
         accounts[name]["include"] = i not in skipped
 
 
@@ -225,11 +231,11 @@ def init_config(balances_path, transactions_path, output_path, interactive=False
         "_help": (
             "Review each account before converting. type is one of "
             + ", ".join(sorted(ACCOUNT_TYPES))
-            + ". status is active or disabled; disabled accounts are hidden from current "
-            "balances but still count toward net worth history. Set include to false to skip "
-            "an account. currency defaults to the Sure family currency. close_after_history adds "
-            "a zero balance the day after the last Monarch balance; null means do it only when "
-            "the history ends before the export does."
+            + ". The account types are guesses: check every one. closed sets the balance to "
+            "zero the day after the last Monarch balance. status is active or disabled; "
+            "disabled accounts are hidden from current balances but still count toward net "
+            "worth history. Set include to false to skip an account. currency defaults to the "
+            "Sure family currency."
         ),
         "accounts": accounts,
     }
@@ -250,6 +256,8 @@ def load_config(path):
             raise ValueError(f"account {name!r} has invalid type {account.get('type')!r}")
         if account.get("status", "active") not in ACCOUNT_STATUSES:
             raise ValueError(f"account {name!r} has invalid status {account.get('status')!r}")
+        if not isinstance(account.get("closed", False), bool):
+            raise ValueError(f"account {name!r} has closed set to {account.get('closed')!r}, not true or false")
     return config
 
 
@@ -360,12 +368,6 @@ def convert(balances_path, transactions_path, config, include_pending=False, exi
     if unknown:
         raise ValueError(f"accounts missing from config (re-run init-config): {', '.join(unknown)}")
 
-    export_end = max(
-        [d for h in balances.values() for d in h]
-        + [date.fromisoformat(r["Date"]) for r in transactions]
-        or [date.today()]
-    )
-
     records = {t: [] for t in RECORD_ORDER}
     categories, tags, merchants = {}, {}, {}
     flows = defaultdict(lambda: defaultdict(Decimal))
@@ -424,10 +426,7 @@ def convert(balances_path, transactions_path, config, include_pending=False, exi
         sign = Decimal(-1) if liability else Decimal(1)  # Sure stores amounts owed as positive
         history = balances.get(name, {})
 
-        close_after = cfg.get("close_after_history")
-        if close_after is None:
-            close_after = bool(history) and max(history) < export_end
-
+        close_after = cfg.get("closed", False)
         account_flows = flows.get(name, {})
         anchors = balance_anchors(history, account_flows, close_after=close_after)
         replayed = replay(anchors, account_flows)
