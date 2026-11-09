@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Monarch to Sure</title>
+<style>
+  :root {
+    --bg: #f7f7f8; --card: #fff; --text: #141414; --muted: #6b6b70; --line: #e4e4e7;
+    --accent: #141414; --accent-text: #fff; --good: #1a7f37; --warn-bg: #fff8e6; --warn: #8a5a00;
+    --bad-bg: #fdecec; --bad: #b42318; --chip: #f1f1f3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f0f10; --card: #1a1a1c; --text: #f2f2f3; --muted: #9a9aa1; --line: #2c2c30;
+      --accent: #f2f2f3; --accent-text: #111; --good: #4ac26b; --warn-bg: #2b2310; --warn: #f0c060;
+      --bad-bg: #2e1414; --bad: #ff8a80; --chip: #26262a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif; background: var(--bg); color: var(--text); }
+  main { max-width: 1200px; margin: 0 auto; padding: 32px 20px 64px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 18px; margin: 0 0 6px; }
+  p { margin: 0 0 12px; }
+  .muted { color: var(--muted); }
+  .small { font-size: 13px; }
+  ol.steps { display: flex; gap: 8px; list-style: none; padding: 0; margin: 20px 0 24px; flex-wrap: wrap; }
+  ol.steps li { padding: 6px 12px; border-radius: 999px; background: var(--chip); color: var(--muted); font-size: 13px; }
+  ol.steps li.current { background: var(--accent); color: var(--accent-text); }
+  ol.steps li.done { color: var(--good); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 24px; }
+  label.field { display: block; margin-bottom: 16px; font-weight: 600; }
+  label.field span { display: block; font-weight: 400; color: var(--muted); font-size: 13px; margin-top: 2px; }
+  input[type=text], input[type=url], input[type=password], select {
+    font: inherit; color: inherit; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
+  }
+  label.field input[type=text], label.field input[type=url], label.field input[type=password] { display: block; width: 100%; margin-top: 6px; }
+  input[type=file] { display: block; margin-top: 6px; font: inherit; }
+  .actions { display: flex; gap: 10px; justify-content: space-between; margin-top: 24px; align-items: center; }
+  button, a.button { text-decoration: none; display: inline-block; }
+  button, a.button { font: inherit; font-weight: 600; border-radius: 8px; padding: 9px 16px; cursor: pointer; border: 1px solid var(--line); background: var(--card); color: var(--text); }
+  button.primary, a.button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  .notice { border-radius: 8px; padding: 10px 14px; margin: 12px 0; }
+  .notice.warn { background: var(--warn-bg); color: var(--warn); }
+  .notice.bad { background: var(--bad-bg); color: var(--bad); }
+  .notice.good { color: var(--good); padding-left: 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); font-weight: 600; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tr.excluded td:not(:first-child) { opacity: .45; }
+  .nowrap { white-space: nowrap; }
+  input.balance { width: 120px; text-align: right; font-variant-numeric: tabular-nums; }
+  input.balance:disabled { opacity: .4; }
+  ul.help { padding-left: 18px; margin: 0 0 12px; }
+  ul.help li { margin-bottom: 4px; }
+  td.name { min-width: 220px; max-width: 380px; overflow-wrap: anywhere; }
+  .chip { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 999px; background: var(--chip); color: var(--muted); margin-left: 6px; white-space: nowrap; }
+  .chip.warn { background: var(--warn-bg); color: var(--warn); }
+  .table-wrap { overflow-x: auto; margin-top: 12px; }
+  .toolbar { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+  dl.stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; margin: 16px 0; }
+  dl.stats div { background: var(--chip); border-radius: 10px; padding: 12px 14px; }
+  dl.stats dt { font-size: 12px; color: var(--muted); }
+  dl.stats dd { margin: 2px 0 0; font-size: 22px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  pre.log { background: var(--chip); border-radius: 8px; padding: 12px; font-size: 13px; max-height: 200px; overflow: auto; white-space: pre-wrap; }
+  details { margin-top: 12px; }
+  summary { cursor: pointer; color: var(--muted); }
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--text); border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: -2px; margin-right: 8px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Monarch to Sure</h1>
+  <p class="muted">Move your accounts, transactions and balance history from Monarch into Sure.</p>
+  <ol class="steps" id="steps"></ol>
+  <div class="card" id="view"></div>
+</main>
+<script>
+"use strict";
+
+const TYPES = [
+  ["Depository", "Cash (checking, savings)"],
+  ["Investment", "Investment"],
+  ["Crypto", "Crypto"],
+  ["Property", "Property"],
+  ["Vehicle", "Vehicle"],
+  ["OtherAsset", "Other asset"],
+  ["CreditCard", "Credit card"],
+  ["Loan", "Loan"],
+  ["OtherLiability", "Other liability"],
+];
+const TYPE_LABELS = Object.fromEntries(TYPES);
+const LIABILITIES = new Set(["CreditCard", "Loan", "OtherLiability"]);
+const STEPS = ["Connect", "Exports", "Accounts", "Review", "Import"];
+
+const params = new URLSearchParams(location.hash.slice(1).replace(/^[^&]*/, ""));
+const hashToken = location.hash.slice(1).split("&")[0];
+if (hashToken) {
+  sessionStorage.setItem("wizardToken", hashToken);
+  history.replaceState(null, "", location.pathname);
+}
+const token = sessionStorage.getItem("wizardToken");
+
+const state = {
+  step: 0,
+  url: params.get("url") || "",
+  connected: params.get("connected") === "1",
+  files: null,
+  choices: {},
+  includePending: false,
+  preview: null,
+};
+
+// Builds DOM nodes; text always goes in as text, never as HTML.
+function el(tag, attrs = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [key, value] of Object.entries(attrs)) {
+    if (value === false || value == null) continue;
+    if (key.startsWith("on")) node.addEventListener(key.slice(2), value);
+    else if (key === "class") node.className = value;
+    else if (value === true) node.setAttribute(key, "");
+    else node.setAttribute(key, value);
+  }
+  node.append(...nodes(children));
+  return node;
+}
+
+// Flattens children and drops the empty values that conditional children
+// such as `flag && el(...)` leave behind.
+function nodes(children) {
+  return children.flat(Infinity)
+    .filter((child) => child != null && child !== false && child !== "")
+    .map((child) => (child instanceof Node ? child : document.createTextNode(String(child))));
+}
+
+async function api(path, body = {}) {
+  const response = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Wizard-Token": token || "" },
+    body: JSON.stringify(body),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (response.status === 403) throw new Error("This page has lost its link to the wizard. Reopen the link printed in the terminal.");
+  if (!response.ok) throw new Error(capitalize(data.error || `Request failed (${response.status})`));
+  return data;
+}
+
+function capitalize(text) {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+function money(value) {
+  if (value == null || value === "") return "";
+  return Number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// Monarch exports amounts owed as negative balances; Sure shows them as positive.
+function sureBalance(monarchBalance, type) {
+  if (monarchBalance == null) return "";
+  if (!LIABILITIES.has(type) || Number(monarchBalance) === 0) return monarchBalance;
+  return monarchBalance.startsWith("-") ? monarchBalance.slice(1) : `-${monarchBalance}`;
+}
+
+function count(value) {
+  return Number(value || 0).toLocaleString();
+}
+
+function render() {
+  const steps = document.getElementById("steps");
+  steps.replaceChildren(...STEPS.map((name, i) =>
+    el("li", { class: i === state.step ? "current" : i < state.step ? "done" : "" }, `${i + 1}. ${name}`)));
+  const view = document.getElementById("view");
+  view.replaceChildren(...nodes([connectView, filesView, accountsView, reviewView, importView][state.step]()));
+  const first = view.querySelector("input, select, button.primary");
+  if (first && state.step < 2) first.focus();
+}
+
+function errorBox() {
+  return el("div", { class: "notice bad", role: "alert", hidden: true });
+}
+
+function showError(box, error) {
+  box.textContent = error.message || String(error);
+  box.hidden = false;
+}
+
+async function busy(button, label, work) {
+  const original = button.textContent;
+  button.disabled = true;
+  button.replaceChildren(el("span", { class: "spinner" }), label);
+  try {
+    await work();
+  } finally {
+    button.disabled = false;
+    button.textContent = original;
+  }
+}
+
+function go(step) {
+  state.step = step;
+  render();
+  window.scrollTo(0, 0);
+}
+
+// Step 1 ---------------------------------------------------------------------
+
+function connectView() {
+  if (!token) {
+    return [el("div", { class: "notice bad" }, "Open this page with the link printed in the terminal.")];
+  }
+  if (state.connected) {
+    return [
+      el("h2", {}, "Connected"),
+      el("p", {}, "Connected to ", el("strong", {}, state.url), " with the API key from your environment."),
+      el("div", { class: "actions" }, el("span"), el("button", { class: "primary", onclick: () => go(1) }, "Continue")),
+    ];
+  }
+  const url = el("input", { type: "url", value: state.url || "http://localhost:3000", required: true, autocomplete: "url" });
+  const key = el("input", { type: "password", required: true, autocomplete: "off" });
+  const error = errorBox();
+  const next = el("button", { class: "primary", type: "submit" }, "Connect");
+  const form = el("form", {
+    onsubmit: (event) => {
+      event.preventDefault();
+      error.hidden = true;
+      busy(next, "Connecting", async () => {
+        try {
+          const result = await api("/api/connect", { url: url.value, api_key: key.value });
+          state.url = result.url;
+          state.existingAccounts = result.existing_accounts;
+          go(1);
+        } catch (e) {
+          showError(error, e);
+        }
+      });
+    },
+  },
+    el("h2", {}, "Connect to Sure"),
+    el("p", { class: "muted" }, "Log in to Sure as the user you're importing for, then create an API key under Settings → API keys with read/write access."),
+    el("label", { class: "field" }, "Sure address", el("span", {}, "The address you open Sure at."), url),
+    el("label", { class: "field" }, "API key", el("span", {}, "Kept in this wizard's memory only, and sent only to your Sure server."), key),
+    error,
+    el("div", { class: "actions" }, el("span"), next),
+  );
+  return [form];
+}
+
+// Step 2 ---------------------------------------------------------------------
+
+function filesView() {
+  const balances = el("input", { type: "file", accept: ".csv,text/csv", required: true });
+  const transactions = el("input", { type: "file", accept: ".csv,text/csv" });
+  const pending = el("input", { type: "checkbox", checked: state.includePending });
+  const error = errorBox();
+  const next = el("button", { class: "primary", type: "submit" }, "Read exports");
+  const form = el("form", {
+    onsubmit: (event) => {
+      event.preventDefault();
+      error.hidden = true;
+      busy(next, "Reading", async () => {
+        try {
+          const body = {
+            balances: await balances.files[0].text(),
+            transactions: transactions.files[0] ? await transactions.files[0].text() : null,
+          };
+          state.files = await api("/api/files", body);
+          state.includePending = pending.checked;
+          state.choices = Object.fromEntries(state.files.accounts.map((a) => [a.name, {
+            type: a.type, closed: a.suggest_closed, include: true, transactions: a.transactions > 0,
+            balance: sureBalance(a.latest_balance, a.type), balanceEdited: false,
+          }]));
+          go(2);
+        } catch (e) {
+          showError(error, e);
+        }
+      });
+    },
+  },
+    el("h2", {}, "Choose your Monarch exports"),
+    el("p", { class: "muted" },
+      "Export your balance history and your transactions from Monarch as CSV files, then choose them here."),
+    state.existingAccounts != null &&
+      el("p", { class: "small muted" }, `Connected to ${state.url}. This Sure user's family has ${count(state.existingAccounts)} accounts.`),
+    el("label", { class: "field" }, "Balances export", el("span", {}, "Columns Date, Balance, Account."), balances),
+    el("label", { class: "field" }, "Transactions export (optional)",
+      el("span", {}, "Leave this empty to import balance history only, without transactions."), transactions),
+    el("label", {}, pending, " Also import pending transactions"),
+    el("p", { class: "small muted" }, "The files are read in this wizard's memory and are not saved anywhere."),
+    error,
+    el("div", { class: "actions" },
+      el("button", { type: "button", onclick: () => go(0), hidden: state.connected }, "Back"),
+      next),
+  );
+  return [form];
+}
+
+// Step 3 ---------------------------------------------------------------------
+
+function accountsView() {
+  const files = state.files;
+  const error = errorBox();
+  const summary = el("p", { class: "small muted" });
+
+  function updateSummary() {
+    const included = files.accounts.filter((a) => state.choices[a.name].include);
+    const withoutTransactions = included.filter((a) => a.transactions > 0 && !state.choices[a.name].transactions);
+    summary.textContent = `${included.length} of ${files.accounts.length} accounts will be imported, ` +
+      `${included.filter((a) => state.choices[a.name].closed).length} as closed` +
+      (files.balances_only ? "." : ` and ${withoutTransactions.length} without their transactions.`);
+  }
+
+  const rows = files.accounts.map((account) => {
+    const choice = state.choices[account.name];
+    const row = el("tr", { class: choice.include ? "" : "excluded" });
+    const include = el("input", {
+      type: "checkbox", checked: choice.include, "aria-label": `Import ${account.name}`,
+      onchange: () => { choice.include = include.checked; row.className = choice.include ? "" : "excluded"; updateSummary(); },
+    });
+    const balance = el("input", {
+      type: "text", inputmode: "decimal", class: "balance", value: choice.balance, disabled: choice.closed,
+      placeholder: "—", "aria-label": `Balance today for ${account.name}`,
+      oninput: () => { choice.balance = balance.value; choice.balanceEdited = true; },
+    });
+    const type = el("select", {
+      "aria-label": `Type of ${account.name}`,
+      onchange: () => {
+        choice.type = type.value;
+        if (!choice.balanceEdited) balance.value = choice.balance = sureBalance(account.latest_balance, choice.type);
+      },
+    }, TYPES.map(([value, label]) => el("option", { value, selected: value === choice.type }, label)));
+    const closed = el("input", {
+      type: "checkbox", checked: choice.closed, "aria-label": `${account.name} is closed`,
+      onchange: () => { choice.closed = closed.checked; balance.disabled = choice.closed; updateSummary(); },
+    });
+    const transactions = account.transactions > 0
+      ? el("label", { class: "nowrap" }, el("input", {
+          type: "checkbox", checked: choice.transactions, "aria-label": `Import transactions for ${account.name}`,
+          onchange: (event) => { choice.transactions = event.target.checked; updateSummary(); },
+        }), ` ${count(account.transactions)}`)
+      : el("span", { class: "muted" }, "none");
+    row.append(
+      el("td", {}, include),
+      el("td", { class: "name" }, el("strong", {}, account.name), el("div", { class: "small muted" }, account.info)),
+      el("td", {}, type),
+      el("td", {}, el("label", { class: "nowrap" }, closed, account.suggest_closed && el("span", { class: "chip warn" }, "inactive"))),
+      el("td", {}, transactions),
+      el("td", { class: "num" }, balance),
+      el("td", { class: "nowrap" }, account.last_activity ? account.last_activity_ago : "never",
+        el("div", { class: "small muted" }, account.last_activity || "")),
+    );
+    return row;
+  });
+  updateSummary();
+
+  function setAll(key, value) {
+    for (const [name, choice] of Object.entries(state.choices)) {
+      if (key === "transactions" && !files.accounts.find((a) => a.name === name).transactions) continue;
+      choice[key] = value;
+    }
+    render();
+  }
+
+  const next = el("button", { class: "primary" }, "Review import");
+  next.addEventListener("click", () => {
+    error.hidden = true;
+    // Only edited balances are sent: an untouched one already matches Monarch.
+    const choices = Object.fromEntries(Object.entries(state.choices).map(([name, c]) =>
+      [name, { ...c, balance: c.balanceEdited ? c.balance : null }]));
+    busy(next, "Preparing", async () => {
+      try {
+        state.preview = await api("/api/preview", { choices, include_pending: state.includePending });
+        go(3);
+      } catch (e) {
+        showError(error, e);
+      }
+    });
+  });
+
+  return [
+    el("h2", {}, "Check each account"),
+    el("p", { class: "muted" },
+      "Monarch's exports don't say what type each account is, so the types below are guesses from the balances. Check every one."),
+    el("ul", { class: "muted help" },
+      el("li", {}, el("strong", {}, "Closed: "),
+        "the balance drops to zero the day after Monarch's last balance, and the account is hidden from current balances but stays in your net worth history. ",
+        `Accounts marked inactive had no activity in the last ${files.stale_after_days} days and start ticked, but inactivity doesn't mean an account was closed.`),
+      el("li", {}, el("strong", {}, "Transactions: "),
+        "untick to import only the account's balance history, without its transactions."),
+      el("li", {}, el("strong", {}, "Balance today: "),
+        "starts at Monarch's latest balance. Change it if that's out of date, and Sure records the new balance as of today. Enter amounts owed on cards and loans as positive numbers.")),
+    files.balances_only && el("div", { class: "notice warn" }, "No transactions export was chosen, so only balance history will be imported."),
+    el("div", { class: "toolbar small" },
+      summary,
+      el("button", { type: "button", onclick: () => setAll("include", true) }, "Import all"),
+      el("button", { type: "button", onclick: () => setAll("closed", false) }, "None closed"),
+      !files.balances_only && el("button", { type: "button", onclick: () => setAll("transactions", true) }, "All transactions"),
+      !files.balances_only && el("button", { type: "button", onclick: () => setAll("transactions", false) }, "Balances only"),
+    ),
+    el("div", { class: "table-wrap" }, el("table", {},
+      el("thead", {}, el("tr", {},
+        el("th", {}, "Import"), el("th", {}, "Account"), el("th", {}, "Type"), el("th", {}, "Closed"),
+        el("th", {}, "Transactions"), el("th", { class: "num" }, "Balance today"), el("th", {}, "Last activity"))),
+      el("tbody", {}, rows))),
+    error,
+    el("div", { class: "actions" }, el("button", { onclick: () => go(1) }, "Back"), next),
+  ];
+}
+
+// Step 4 ---------------------------------------------------------------------
+
+function reviewView() {
+  const preview = state.preview;
+  const stats = preview.stats;
+  const error = errorBox();
+  const clashes = preview.existing_account_names;
+  const allow = el("input", { type: "checkbox" });
+  const next = el("button", { class: "primary" }, "Import into Sure");
+
+  if (clashes.length) {
+    next.disabled = true;
+    allow.addEventListener("change", () => { next.disabled = !allow.checked; });
+  }
+  next.addEventListener("click", () => {
+    error.hidden = true;
+    busy(next, "Starting", async () => {
+      try {
+        await api("/api/import", { allow_existing_accounts: allow.checked });
+        go(4);
+      } catch (e) {
+        showError(error, e);
+      }
+    });
+  });
+
+  const tile = (label, value) => el("div", {}, el("dt", {}, label), el("dd", {}, count(value)));
+  const notes = [];
+  if (stats.transactions_skipped_balances_only) {
+    notes.push(`${count(stats.transactions_skipped_balances_only)} transactions are left out because their accounts import balance history only.`);
+  }
+  if (stats.categories_reusing_existing) {
+    notes.push(`${count(stats.categories_reusing_existing)} categories already exist in Sure and are reused as they are.`);
+  }
+  if (stats.transactions_unlinked_from_existing_merchant) {
+    notes.push(`${count(stats.transactions_unlinked_from_existing_merchant)} transactions name a merchant that already exists in Sure. They keep the name but aren't linked to it, so the existing merchant is left unchanged.`);
+  }
+  if (preview.skipped_accounts.length) {
+    notes.push(`Skipped: ${preview.skipped_accounts.join(", ")}.`);
+  }
+
+  return [
+    el("h2", {}, "Review the import"),
+    el("p", { class: "muted" }, `This is what will be created in ${state.url}. Nothing has been sent yet.`),
+    el("dl", { class: "stats" },
+      tile("Accounts", stats.Account),
+      tile("Transactions", stats.Transaction),
+      tile("Balance updates", stats.Valuation),
+      tile("Categories", stats.Category),
+      tile("Merchants", stats.Merchant),
+      tile("Tags", stats.Tag)),
+    el("p", { class: "small muted" },
+      "Balance updates are added only where transactions don't explain Monarch's balance, so Sure shows the same history as Monarch."),
+    notes.map((note) => el("p", { class: "small" }, note)),
+    clashes.length > 0 && el("div", { class: "notice warn" },
+      el("p", {}, "Sure already has accounts with these names: ", el("strong", {}, clashes.join(", ")),
+        ". If you imported before, importing again creates duplicates."),
+      el("label", {}, allow, " Import anyway")),
+    el("details", {},
+      el("summary", {}, "Accounts to create"),
+      el("div", { class: "table-wrap" }, el("table", {},
+        el("thead", {}, el("tr", {}, el("th", {}, "Account"), el("th", {}, "Type"), el("th", {}, "Status"),
+          el("th", { class: "num" }, "Balance in Sure"), el("th", { class: "num" }, "Balance updates"))),
+        el("tbody", {}, preview.accounts.map((a) => el("tr", {},
+          el("td", {}, a.name), el("td", {}, TYPE_LABELS[a.type] || a.type),
+          el("td", {}, a.status === "disabled" ? "Closed" : "Active"),
+          el("td", { class: "num" }, money(a.balance)), el("td", { class: "num" }, count(a.valuations)))))))),
+    error,
+    el("div", { class: "actions" }, el("button", { onclick: () => go(2) }, "Back"), next),
+  ];
+}
+
+// Step 5 ---------------------------------------------------------------------
+
+function importView() {
+  const heading = el("h2", {}, "Importing");
+  const status = el("p", {}, el("span", { class: "spinner" }), "Sending your data to Sure. Keep this page and the terminal open.");
+  const log = el("pre", { class: "log" });
+  const result = el("div");
+
+  async function poll() {
+    let job;
+    try {
+      job = await api("/api/status");
+    } catch (e) {
+      status.replaceChildren(el("div", { class: "notice bad" }, e.message));
+      return;
+    }
+    log.textContent = job.log.join("\n");
+    if (job.state === "running") {
+      setTimeout(poll, 2000);
+      return;
+    }
+    if (job.state === "complete") {
+      heading.textContent = "Import complete";
+      status.replaceChildren(el("span", { class: "notice good" }, "Done. Sure is now calculating balances, which can take a minute."));
+      result.replaceChildren(summaryTable(job.session.summary || {}),
+        el("div", { class: "actions" }, el("span"),
+          el("a", { class: "button primary", href: `${state.url}/accounts`, target: "_blank", rel: "noopener" }, "Open Sure")));
+    } else {
+      heading.textContent = "Import failed";
+      const detail = job.error || JSON.stringify(job.session && job.session.error, null, 2);
+      status.replaceChildren(el("div", { class: "notice bad" }, "The import didn't finish. Running it again resumes it without creating duplicates."));
+      result.replaceChildren(el("pre", { class: "log" }, detail),
+        el("div", { class: "actions" }, el("button", { onclick: () => go(3) }, "Back to review")));
+    }
+  }
+  poll();
+  return [heading, status, log, result];
+}
+
+function summaryTable(summary) {
+  const rows = Object.entries(summary).filter(([, v]) => v && typeof v === "object");
+  if (!rows.length) return el("span");
+  return el("div", { class: "table-wrap" }, el("table", {},
+    el("thead", {}, el("tr", {}, el("th", {}, "Imported"), el("th", { class: "num" }, "Created"),
+      el("th", { class: "num" }, "Updated"), el("th", { class: "num" }, "Skipped"), el("th", { class: "num" }, "Failed"))),
+    el("tbody", {}, rows.map(([name, v]) => el("tr", {},
+      el("td", {}, capitalize(name)), el("td", { class: "num" }, count(v.created)), el("td", { class: "num" }, count(v.updated)),
+      el("td", { class: "num" }, count(v.skipped)), el("td", { class: "num" }, count(v.failed)))))));
+}
+
+render();
+</script>
+</body>
+</html>

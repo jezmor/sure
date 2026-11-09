@@ -9,6 +9,8 @@ chunked import session.
   2. convert      build the Sure NDJSON file (review it before uploading)
   3. upload       send the NDJSON file to a Sure server
 
+or run "wizard" to do all three in a browser.
+
 Only the Python standard library is used.
 """
 import argparse
@@ -56,8 +58,12 @@ def parse_decimal(value):
         raise ValueError(f"not a number: {value!r}")
 
 
-def read_csv(path):
-    with open(path, newline="", encoding="utf-8-sig") as f:
+def read_csv(source):
+    """Read a CSV from a path, or from a text stream such as the wizard's uploads."""
+    if hasattr(source, "read"):
+        source.seek(0)
+        return list(csv.DictReader(source))
+    with open(source, newline="", encoding="utf-8-sig") as f:
         return list(csv.DictReader(f))
 
 
@@ -103,7 +109,7 @@ def last_activity(history, tx_dates):
     return max(candidates) if candidates else None
 
 
-def guess_account(name, history, tx_dates, export_end):
+def guess_account(name, history, tx_dates, export_end, tx_count=None):
     values = [history[d] for d in sorted(history)]
     nonzero = [v for v in values if v != 0]
     negative_share = sum(1 for v in nonzero if v < 0) / len(nonzero) if nonzero else 0
@@ -124,11 +130,13 @@ def guess_account(name, history, tx_dates, export_end):
         "status": "active",
         "subtype": None,
         "include": True,
+        "transactions": True,
+        "current_balance": None,
         "currency": None,
         "_suggest_closed": stale,
         "_last_activity": active_on.isoformat() if active_on else None,
         "_latest_balance": str(values[-1]) if values else None,
-        "_transactions": len(tx_dates),
+        "_transactions": len(tx_dates) if tx_count is None else tx_count,
         "_info": (
             f"{len(values)} balance days"
             + (f" ({min(history)} to {max(history)})" if history else "")
@@ -143,7 +151,10 @@ def parse_selection(text, count):
         if not part:
             continue
         low, _, high = part.partition("-")
-        low, high = int(low), int(high or low)
+        try:
+            low, high = int(low), int(high or low)
+        except ValueError:
+            raise ValueError(f"{part!r} isn't a number or range (separate them with commas)") from None
         if not 1 <= low <= high <= count:
             raise ValueError(f"{part} is not between 1 and {count}")
         selected.update(range(low, high + 1))
@@ -213,17 +224,28 @@ def review_accounts(accounts, export_end, ask=input, out=print):
         accounts[name]["include"] = i not in skipped
 
 
-def init_config(balances_path, transactions_path, output_path, interactive=False, ask=input, out=print):
+def inspect_accounts(balances_path, transactions_path):
+    """Return ({account: suggested config}, last date in the exports)."""
     balances = read_balances(balances_path)
-    tx_dates = defaultdict(set)
+    tx_dates, tx_counts = defaultdict(set), defaultdict(int)
     for row in read_transactions(transactions_path, include_pending=True):
         tx_dates[row["Account"]].add(date.fromisoformat(row["Date"]))
+        tx_counts[row["Account"]] += 1
 
-    export_end = max([d for h in balances.values() for d in h] + [d for s in tx_dates.values() for d in s])
+    all_dates = [d for h in balances.values() for d in h] + [d for s in tx_dates.values() for d in s]
+    if not all_dates:
+        raise ValueError("the exports contain no balances or transactions")
+    export_end = max(all_dates)
     names = sorted(set(balances) | set(tx_dates))
     accounts = {
-        name: guess_account(name, balances.get(name, {}), tx_dates[name], export_end) for name in names
+        name: guess_account(name, balances.get(name, {}), tx_dates[name], export_end, tx_counts[name])
+        for name in names
     }
+    return accounts, export_end
+
+
+def init_config(balances_path, transactions_path, output_path, interactive=False, ask=input, out=print):
+    accounts, export_end = inspect_accounts(balances_path, transactions_path)
     if interactive:
         review_accounts(accounts, export_end, ask=ask, out=out)
 
@@ -234,8 +256,10 @@ def init_config(balances_path, transactions_path, output_path, interactive=False
             + ". The account types are guesses: check every one. closed sets the balance to "
             "zero the day after the last Monarch balance. status is active or disabled; "
             "disabled accounts are hidden from current balances but still count toward net "
-            "worth history. Set include to false to skip an account. currency defaults to the "
-            "Sure family currency."
+            "worth history. Set include to false to skip an account, or transactions to false to "
+            "import only its balance history. current_balance sets today's balance as Sure shows "
+            "it, with amounts owed as positive numbers; null keeps Monarch's latest balance. "
+            "currency defaults to the Sure family currency."
         ),
         "accounts": accounts,
     }
@@ -248,7 +272,15 @@ def init_config(balances_path, transactions_path, output_path, interactive=False
 
 def load_config(path):
     with open(path, encoding="utf-8") as f:
-        config = json.load(f)
+        return validate_config(json.load(f))
+
+
+def current_balance(account):
+    value = account.get("current_balance")
+    return None if value is None else parse_decimal(str(value))
+
+
+def validate_config(config):
     for name, account in config["accounts"].items():
         if not account.get("include", True):
             continue
@@ -256,8 +288,15 @@ def load_config(path):
             raise ValueError(f"account {name!r} has invalid type {account.get('type')!r}")
         if account.get("status", "active") not in ACCOUNT_STATUSES:
             raise ValueError(f"account {name!r} has invalid status {account.get('status')!r}")
-        if not isinstance(account.get("closed", False), bool):
-            raise ValueError(f"account {name!r} has closed set to {account.get('closed')!r}, not true or false")
+        for flag in ("closed", "transactions"):
+            if not isinstance(account.get(flag, flag == "transactions"), bool):
+                raise ValueError(f"account {name!r} has {flag} set to {account.get(flag)!r}, not true or false")
+        try:
+            current_balance(account)
+        except ValueError:
+            raise ValueError(
+                f"account {name!r} has current_balance {account.get('current_balance')!r}, which isn't a number"
+            ) from None
     return config
 
 
@@ -333,6 +372,16 @@ def replay(anchors, flows, end=None):
     return balances
 
 
+def with_current_balance(anchors, flows, as_of, balance):
+    """Add an anchor so the replayed balance on as_of equals balance.
+
+    Leaves anchors unchanged when the history already ends at that balance.
+    """
+    if anchors and replay(anchors, flows, end=as_of).get(as_of) == balance:
+        return anchors
+    return sorted([a for a in anchors if a[0] != as_of] + [(as_of, balance)])
+
+
 # ---------------------------------------------------------------------------
 # Conversion to Sure NDJSON
 # ---------------------------------------------------------------------------
@@ -349,7 +398,7 @@ def money(value):
     return str(value.quantize(Decimal("0.01")) + 0)  # + 0 turns -0.00 into 0.00
 
 
-def convert(balances_path, transactions_path, config, include_pending=False, existing=None):
+def convert(balances_path, transactions_path, config, include_pending=False, existing=None, today=None):
     """Return (records, stats) where records is a list of NDJSON envelopes.
 
     existing comes from SureClient.existing_records. Same-named categories keep
@@ -358,6 +407,7 @@ def convert(balances_path, transactions_path, config, include_pending=False, exi
     replace, so those transactions keep the merchant name but no merchant link.
     """
     existing = existing or {"categories": {}, "merchants": set()}
+    today = today or date.today()
     balances = read_balances(balances_path)
     transactions = read_transactions(transactions_path, include_pending=include_pending)
     accounts = {
@@ -377,6 +427,9 @@ def convert(balances_path, transactions_path, config, include_pending=False, exi
         name = row["Account"]
         if name not in accounts:
             stats["transactions_skipped_excluded_account"] += 1
+            continue
+        if not accounts[name].get("transactions", True):
+            stats["transactions_skipped_balances_only"] += 1
             continue
 
         amount = parse_decimal(row["Amount"])
@@ -429,6 +482,9 @@ def convert(balances_path, transactions_path, config, include_pending=False, exi
         close_after = cfg.get("closed", False)
         account_flows = flows.get(name, {})
         anchors = balance_anchors(history, account_flows, close_after=close_after)
+        override = current_balance(cfg)
+        if override is not None and not close_after:
+            anchors = with_current_balance(anchors, account_flows, today, override * sign)
         replayed = replay(anchors, account_flows)
         current = replayed[max(replayed)] if replayed else Decimal(0)
 
@@ -474,10 +530,13 @@ def convert(balances_path, transactions_path, config, include_pending=False, exi
     return ordered, dict(stats)
 
 
+def ndjson_lines(records):
+    return [json.dumps(r, separators=(",", ":")) + "\n" for r in records]
+
+
 def write_ndjson(records, path):
     with open(path, "w", encoding="utf-8") as f:
-        for r in records:
-            f.write(json.dumps(r, separators=(",", ":")) + "\n")
+        f.writelines(ndjson_lines(records))
 
 
 def chunk_lines(lines, max_bytes=DEFAULT_CHUNK_BYTES):
@@ -579,9 +638,13 @@ def conflicts_with_existing_data(records, client, allow_existing_accounts=False)
     return problems
 
 
-def upload(ndjson_path, client, allow_existing_accounts=False, poll_seconds=5):
+def upload(ndjson_path, client, allow_existing_accounts=False, poll_seconds=5, log=print):
     with open(ndjson_path, encoding="utf-8") as f:
         lines = f.readlines()
+    return upload_lines(lines, client, allow_existing_accounts, poll_seconds, log)
+
+
+def upload_lines(lines, client, allow_existing_accounts=False, poll_seconds=5, log=print):
     content = "".join(lines)
 
     chunks = list(chunk_lines(lines))
@@ -596,7 +659,7 @@ def upload(ndjson_path, client, allow_existing_accounts=False, poll_seconds=5):
     })["data"]
 
     if session["status"] == "complete":
-        print("This file was already imported; nothing to do.")
+        log("This file was already imported; nothing to do.")
         return session
 
     # A resumed session may already have created some of these records, so the
@@ -610,7 +673,7 @@ def upload(ndjson_path, client, allow_existing_accounts=False, poll_seconds=5):
 
     if session["status"] != "importing":
         for sequence, chunk in enumerate(chunks, start=1):
-            print(f"Uploading chunk {sequence}/{len(chunks)}")
+            log(f"Uploading chunk {sequence}/{len(chunks)}")
             client.request("POST", f"/api/v1/import_sessions/{session['id']}/chunks", {
                 "sequence": sequence,
                 "client_chunk_id": f"chunk-{sequence}",
@@ -618,7 +681,7 @@ def upload(ndjson_path, client, allow_existing_accounts=False, poll_seconds=5):
             })
         client.request("POST", f"/api/v1/import_sessions/{session['id']}/publish")
 
-    print("Waiting for Sure to process the import")
+    log("Waiting for Sure to process the import")
     while True:
         session = client.request("GET", f"/api/v1/import_sessions/{session['id']}")["data"]
         if session["status"] in ("complete", "failed"):
@@ -641,13 +704,13 @@ def main(argv=None):
 
     p = sub.add_parser("init-config", help="write an editable account config from the exports")
     p.add_argument("--balances", required=True)
-    p.add_argument("--transactions", required=True)
+    p.add_argument("--transactions", help="omit to import balance history only")
     p.add_argument("-o", "--output", default="accounts.json")
     p.add_argument("--no-input", action="store_true", help="don't ask which accounts to disable or skip")
 
     p = sub.add_parser("convert", help="build the Sure NDJSON import file")
     p.add_argument("--balances", required=True)
-    p.add_argument("--transactions", required=True)
+    p.add_argument("--transactions", help="omit to import balance history only")
     p.add_argument("--config", default="accounts.json")
     p.add_argument("--include-pending", action="store_true", help="also import pending transactions")
     p.add_argument("-o", "--output", default="sure-import.ndjson")
@@ -661,6 +724,11 @@ def main(argv=None):
     p.add_argument("ndjson")
     add_server_args(p)
     p.add_argument("--allow-existing-accounts", action="store_true")
+
+    p = sub.add_parser("wizard", help="do the whole import in your browser")
+    p.add_argument("--port", type=int, default=8765, help="local port (default 8765; 0 picks a free one)")
+    p.add_argument("--no-browser", action="store_true", help="print the link instead of opening it")
+    add_server_args(p)
 
     args = parser.parse_args(argv)
 
@@ -682,6 +750,10 @@ def main(argv=None):
         print(f"Wrote {args.output}")
         for key, value in sorted(stats.items()):
             print(f"  {key}: {value}")
+
+    elif args.command == "wizard":
+        import wizard
+        wizard.run(port=args.port, open_browser=not args.no_browser, url=args.url, api_key=args.api_key)
 
     elif args.command == "upload":
         if not args.url or not args.api_key:

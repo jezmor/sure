@@ -22,6 +22,28 @@ Not imported: pending transactions (unless `--include-pending` is passed),
 `Original Statement` (used as the transaction name only when `Merchant` is
 blank), and `Owner`, `Reviewed`, `Reviewed At` and `Reviewed By`.
 
+## Wizard
+
+The easiest way to import is the browser wizard:
+
+```sh
+python3 tools/monarch_to_sure/monarch_to_sure.py wizard
+```
+
+It opens a page on this computer that walks through the whole import:
+connect to Sure with an API key, choose the Monarch exports, check each
+account's type and whether it's closed, review what will be created, and
+import. It runs the same conversion and upload as the commands below. The
+exports stay in memory and aren't saved anywhere, and the page only answers
+on `127.0.0.1` to the link printed in the terminal.
+
+Leave the transactions export out to import balance history only. To do that
+for some accounts only, untick their **Transactions** box. **Balance today**
+starts at Monarch's latest balance; change it if that's out of date, and Sure
+records the new balance as of today. In `accounts.json` these are
+`"transactions": false` and `"current_balance"`, with amounts owed entered as
+positive numbers.
+
 ## Usage
 
 1. In Monarch, export transactions and balance history as CSV files.
@@ -32,6 +54,9 @@ blank), and `Owner`, `Reviewed`, `Reviewed At` and `Reviewed By`.
    python3 tools/monarch_to_sure/monarch_to_sure.py init-config \
      --balances Balances.csv --transactions Transactions.csv -o accounts.json
    ```
+
+   Leave out `--transactions`, here and in `convert`, to import balance
+   history only. Every change in balance then becomes a balance valuation.
 
    It lists every account with its last activity: the later of its last
    transaction and the last day its balance changed. It then asks which

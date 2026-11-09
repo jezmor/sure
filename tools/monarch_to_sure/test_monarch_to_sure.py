@@ -162,6 +162,53 @@ class ConvertTest(unittest.TestCase):
         self.assertNotIn("monarch-account:Card", self.records("Account"))
         self.assertNotIn("monarch-transaction:3", self.records("Transaction"))
 
+    def test_balances_only_anchors_every_change(self):
+        config = m.init_config(self.balances, None, self.config_path)
+        records, stats = m.convert(self.balances, None, config)
+        self.assertEqual(0, stats["Transaction"])
+        checking = [r["data"] for r in records if r["type"] == "Valuation" and r["data"]["account_id"] == "monarch-account:Checking"]
+        self.assertEqual(["100.00", "90.00", "95.00"], [v["amount"] for v in checking])
+
+    def test_accounts_can_skip_their_transactions(self):
+        self.config["accounts"]["Checking"]["transactions"] = False
+        records, stats = m.convert(self.balances, self.transactions, self.config)
+        accounts = {r["data"]["account_id"] for r in records if r["type"] == "Transaction"}
+        self.assertEqual({"monarch-account:Card"}, accounts)
+        self.assertEqual(3, stats["transactions_skipped_balances_only"])
+        checking = [r["data"]["amount"] for r in records
+                    if r["type"] == "Valuation" and r["data"]["account_id"] == "monarch-account:Checking"]
+        self.assertEqual(["100.00", "90.00", "95.00"], checking)
+
+    def test_current_balance_adds_a_valuation_today(self):
+        today = date(2024, 1, 10)
+        self.config["accounts"]["Checking"]["current_balance"] = "120"
+        self.config["accounts"]["Card"]["current_balance"] = "80"  # owed, as Sure shows it
+        records, _ = m.convert(self.balances, self.transactions, self.config, today=today)
+        valuations = {r["data"]["id"]: r["data"] for r in records if r["type"] == "Valuation"}
+        accounts = {r["data"]["name"]: r["data"] for r in records if r["type"] == "Account"}
+        self.assertEqual("120.00", valuations["monarch-valuation:Checking:2024-01-10"]["amount"])
+        self.assertEqual("80.00", valuations["monarch-valuation:Card:2024-01-10"]["amount"])
+        self.assertEqual(("120.00", "80.00"), (accounts["Checking"]["balance"], accounts["Card"]["balance"]))
+
+    def test_unchanged_current_balance_adds_nothing(self):
+        before = self.records("Valuation", today=date(2024, 1, 10))
+        self.config["accounts"]["Checking"]["current_balance"] = "95.00"
+        self.config["accounts"]["Card"]["current_balance"] = "70"
+        self.assertEqual(before, self.records("Valuation", today=date(2024, 1, 10)))
+
+    def test_closed_accounts_ignore_current_balance(self):
+        self.config["accounts"]["Checking"].update(closed=True, current_balance="500")
+        amounts = [v["amount"] for k, v in self.records("Valuation", today=date(2024, 1, 10)).items() if ":Checking:" in k]
+        self.assertNotIn("500.00", amounts)
+        self.assertEqual("0.00", amounts[-1])
+
+    def test_current_balance_must_be_a_number(self):
+        self.config["accounts"]["Checking"]["current_balance"] = "lots"
+        with self.assertRaisesRegex(ValueError, "Checking"):
+            m.validate_config(self.config)
+        self.config["accounts"]["Checking"]["current_balance"] = 0
+        self.assertIsNotNone(m.current_balance(m.validate_config(self.config)["accounts"]["Checking"]))
+
     def test_existing_categories_keep_their_look(self):
         existing = {"categories": {"Groceries": {"color": "#123456", "lucide_icon": "carrot"}}, "merchants": set()}
         categories = self.records("Category", existing=existing)
@@ -200,6 +247,8 @@ class AccountReviewTest(unittest.TestCase):
         self.assertEqual("1,4-6", m.format_selection({1, 4, 5, 6}))
         with self.assertRaises(ValueError):
             m.parse_selection("7", 6)
+        with self.assertRaisesRegex(ValueError, "'2.3' isn't a number or range"):
+            m.parse_selection("1, 2. 3", 6)
 
     def accounts(self):
         end = date(2024, 12, 31)
